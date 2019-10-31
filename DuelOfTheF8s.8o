@@ -33,14 +33,14 @@
 	clear
 
 
-	v4 := 3
+	v4 := 0
 	v5 := 0
 	v6 := 0
 	
 	draw_figure_step_pose
 
 	# Draw f1 arms
-	v4 := 9
+	v4 := 0
 	v5 := 0
 	v6 := 0
 	:breakpoint test
@@ -536,14 +536,13 @@
 
 		v0 += v6
 		v1 += v5
-		plane 3
+		plane 1
 		loop
 			while v2 != 0
-			sprite v0 v1 0
+			sprite v0 v1 1
 			v1 += 1
 			v2 += -1
 		again
-		plane 1
 		jump figure_arms_end
 	end
 
@@ -552,6 +551,7 @@
 	if v3 != 0 begin
 		i := long arm_extra_data
 		v1 := v3
+		v1 += -1
 		jump draw_figure_arms_loop
 	end
 
@@ -1195,12 +1195,9 @@
 
 
 
-
-
-
 : arm_extra_data
 # 1
-	2 1 2 0 10 8
+	2 1 2 0 11 8
 	
 # color 0: 0x00000000
 # color 1: 0xFF000000
