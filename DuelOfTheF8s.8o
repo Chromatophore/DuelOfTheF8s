@@ -33,7 +33,7 @@
 	clear
 
 
-	v4 := 0
+	v4 := 1
 	v5 := 0
 	v6 := 0
 	
@@ -458,6 +458,7 @@
 : draw_figure_arms
 	# we want to pull all 6 entries out without clobbering our data really
 	i := long stationary_arm_data
+	i := long swinging_arm_data
 
 	v1 := v4
 : draw_figure_arms_loop
@@ -479,7 +480,7 @@
 	if vf == 1 begin
 		# v1 and v2 contain the row and column
 		i := long arm_parts
-		vf := 32
+		vf := 64
 		# the data is stored from top to bottom, and then left to right
 		# for each column, add 32
 		loop
@@ -524,6 +525,12 @@
 		end
 		if ve == 2 begin
 			i := long two_x
+		end
+		if ve == 3 begin
+			i := long three_x
+		end
+		if ve == 4 begin
+			i := long four_x
 		end
 
 		# v2 contains how many lines, and to avoid annoyance, just manually repeat the draw and move down by 1
@@ -697,6 +704,10 @@
 	0x80 0x80 0x80 0x80 0x80 0x80 0x80 0x80
 : two_x
 	0xC0 0xC0 0xC0 0xC0 0xC0 0xC0 0xC0 0xC0
+: three_x
+	0xE0
+: four_x	
+	0xF0
 
 # color 0: 0x00000000
 # color 1: 0xFF000000
@@ -1193,12 +1204,50 @@
 # B5
 	1 11 0 0 9 12
 
+: swinging_arm_data
+# F1-B1-A
+	1 2 1 0 14 3
+# F1-B1-B
+	1 3 1 0 12 3
+
+# F1-B2-A
+	1 6 1 0 11 4
+# F1-B2-B
+	1 7 1 2 14 0
+
+# F1-B3-A
+	1 9 1 0 14 6
+# F1-B3-B
+	1 10 1 0 14 1
+
+# F1-B4-A
+	1 13 1 3 13 8
+# F1-B4-B
+	1 14 1 4 18 12
+
+# F1-B5-A
+	1 3 2 0 18 8
+# F1-B5-B
+	1 4 2 6 18 8
+
 
 
 : arm_extra_data
 # 1
 	2 1 2 0 11 8
-	
+# 2
+	2 1 2 0 14 15
+# 3
+	2 1 1 0 12 9
+# 4
+	2 1 2 5 14 11
+# 5
+	2 1 3 0 14 14
+# 6
+	2 1 1 7 20 9
+# 7
+	2 4 1 0 18 10
+
 # color 0: 0x00000000
 # color 1: 0xFF000000
 # color 2: 0xFFFF0000
