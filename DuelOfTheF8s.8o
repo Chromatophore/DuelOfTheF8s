@@ -459,8 +459,9 @@
 	# we want to pull all 6 entries out without clobbering our data really
 	i := long stationary_arm_data
 
-	v0 := 6
 	v1 := v4
+: draw_figure_arms_loop
+	v0 := 6
 	loop
 		while v1 != 0
 		i += v0
@@ -511,34 +512,21 @@
 		plane 3
 		sprite v0 v1 0
 		plane 1
-		;
+		jump figure_arms_end
 	end
 
 
 	if vf == 2 begin
-		i := long arm_parts
-		vf := 32
-		# the data is stored from top to bottom, and then left to right
-		# for each column, add 32
-		loop
-			while v2 != 0
-			i += vf
-			v2 += -1
-		again
 
+		# select type of thing:
+		if ve == 1 begin
+			i := long one_x
+		end
+		if ve == 2 begin
+			i := long two_x
+		end
 
-		# Copy row value back from ve
-		v2 := ve
-
-		# for each row, we have to move on by 256
-		vf := 64
-
-		loop
-			while v2 != 0
-			i += vf
-			i += vf
-			v2 += -1
-		again
+		# v2 contains how many lines, and to avoid annoyance, just manually repeat the draw and move down by 1
 
 		# v3 contains if there's a follow on entry
 		# v0 tells us the x offset
@@ -549,10 +537,24 @@
 		v0 += v6
 		v1 += v5
 		plane 3
-		sprite v0 v1 15
+		loop
+			while v2 != 0
+			sprite v0 v1 0
+			v1 += 1
+			v2 += -1
+		again
 		plane 1
-		;
-	end 
+		jump figure_arms_end
+	end
+
+: figure_arms_end
+	# v3 contains an additional instruction
+	if v3 != 0 begin
+		i := long arm_extra_data
+		v1 := v3
+		jump draw_figure_arms_loop
+	end
+
 ;
 
 
