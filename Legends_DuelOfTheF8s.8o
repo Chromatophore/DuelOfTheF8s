@@ -8,8 +8,8 @@
 
 # " abcdefghijklmnopqrstuvwxyz!0123456789-.,'"
 
-:const delay_value_slow 0x0a
-:const delay_value_fast 0x07
+:const delay_value_slow 0x05
+:const delay_value_fast 0x05
 
 :alias last_pose vd
 :alias current_pose vc
@@ -38,14 +38,14 @@
 
 
 	do_delay
-	auto_text unfin1 1 5
+	auto_text unfin1 20 5
 	do_delay
-	auto_text unfin2 1 11
+	auto_text unfin2 27 11
 
 	do_delay
-	auto_text unfin3 1 17
+	auto_text unfin3 24 27
 	do_delay
-	auto_text unfin4 1 23
+	auto_text unfin4 18 33
 
 	intro_wait
 	clear
