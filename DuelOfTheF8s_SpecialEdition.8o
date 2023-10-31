@@ -86,8 +86,7 @@
 # DONE 1) Create attack sequence where we can message with traffic lights that
 # something will or won't be blocked
 # DONE 2) Create animations that accompany this
-
-# 3) Integrate both sides of the game with one another and add a 'momentum bar'?
+# DONE-ISH 3) Integrate both sides of the game with one another and add a 'momentum bar'?
 # 4) Allow the game to be 'lost'
 # 5) Allow the game to detect the player earning an attack sequence
 # 6) Reintegrate the original opening cutscenes
@@ -107,11 +106,11 @@
 	:alias player_lastx vE
 	player_frame := 0
 
-	get_char
-	draw_char
+#	get_char
+	#draw_char
 
-	get_maul
-	draw_maul
+	#get_maul
+	#draw_maul
 
 	: game_loop
 
@@ -124,45 +123,91 @@
 		v0 := 0x6 if v0 key then v1 := 4
 		v0 := 0x4 if v0 key then v1 := 5
 
+		v0 := 0x1 if v0 key then vA := 1
+		v0 := 0x9 if v0 key then vA := 0
+
 		if v1 != 0 then set_player_goal
 
-		service_barline
-		#service_attackline
+		if vA == 0 then service_barline
+		if vA == 1 then service_attackline
 		service_maul
 		service_player
 
-		i := player_ui
-		v0 := 8
-		v1 := 0
-		plane 1
-		sprite v0 v1 7
-		v0 := 59
-		sprite v0 v1 7
-		plane 3
-
-		i := m_player_goal
-		load v1 - v1
-
-		i := select_height_ob1
-		i += v1
-		load v1 - v1
-
-		if v1 != -1 begin
-			v0 := 9
-			i := player_select
-			sprite v0 v1 3
-		end
+		draw_ui
 
 		q_delay
 
 		jump game_loop
 ; 
 
+: draw_ui
+	i := player_ui
+	v0 := 8
+	v1 := 2
+	plane 1
+	sprite v0 v1 7
+	v0 := 59
+	sprite v0 v1 7
+
+	i := m_player_goal
+	load v1 - v1
+
+	i := select_height_ob1
+	i += v1
+	load v1 - v1
+
+	if v1 != -1 begin
+		v0 := 9
+		i := player_select
+		sprite v0 v1 3
+	end
+
+	i := single_pixel
+	v0 := 0
+	v1 := 0
+	sprite v0 v1 1
+	v0 := 31
+	sprite v0 v1 1
+	v0 := 32
+	sprite v0 v1 1
+	v0 := 63
+	sprite v0 v1 1
+
+	i := line_h
+	v0 := 1
+	v1 := 1
+	sprite v0 v1 1
+	v0 += 8
+	sprite v0 v1 1
+	v0 += 8
+	sprite v0 v1 1
+	v0 += 8
+	sprite v0 v1 1
+	v0 += 8
+	sprite v0 v1 1
+	v0 += 8
+	sprite v0 v1 1
+	v0 += 8
+	sprite v0 v1 1
+	v0 += 8
+	i := line_less
+	sprite v0 v1 1
+	plane 3
+;
+
+: single_pixel
+0x80
+: line_h
+0xFF
+: line_less
+0b11111100
+0b11111100
+
 : select_height_ob1
--1 0 2 4 -1 -1
+-1 2 4 6 -1 -1
 
 : select_height
-0 1 3 5 0 0
+0 3 5 7 0 0
 
 : player_select
 0b11000000
@@ -193,8 +238,6 @@
 0b01100000
 
 : barline_number
-	40 5
-	80 1
 	0 0
 	0 0
 	0 0
@@ -203,40 +246,154 @@
 	0 0
 	0 0
 	0 0
+	0 0
+	0 0
+
+:monitor barline_number 16
+
+# OK so I need a governer for an attack time line
+# My iniital approach was to have a database of possible bar lines with numbers in them
+# the issue with this is that I want to warn the player of the pattern before hand
+# So I want to be able to process the pattern twice effectively
+
+: count_master
+0 0
+
+:monitor count_master 2
+
+: attack_creation_index
+8
+
+: attack_pattern
+0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0
+
+: test_pattern
+1 0 2 0 3 0 2 0
+
+:const c_count_master_sub 20
+
+:const c_attack_creation_cap 16
+:const c_attack_creation_next_wave 16
+:const c_attack_creation_next_wave_plus 18
+
+: reset_count_master
+	i := count_master
+	v0 := 0
+	v1 := 0
+	save v1
+;
 
 : service_barline
+	:alias r_aci v9
 
+	i := attack_creation_index
+	load r_aci - r_aci
+
+	i := count_master
+	load v1
+
+	if r_aci == c_attack_creation_next_wave begin
+		# the pattern has finished?
+		i := test_pattern
+		load v7
+		i := attack_pattern
+		save v7
+
+		i := attack_creation_index
+		r_aci := c_attack_creation_next_wave_plus
+		save r_aci - r_aci
+
+		# Reset the counter?
+		reset_count_master
+	end
+
+	v1 += 1
+
+	if v1 == c_count_master_sub begin
+		v1 := 0
+		v0 += 1
+	end
+
+	i := count_master
+	save v1
+
+	if r_aci == c_attack_creation_next_wave_plus begin
+		i := attack_pattern
+		i += v0
+
+		load v2 - v2
+
+		if v2 != 0 begin
+			v4 := 59
+			i := select_height_ob1
+			i += v2
+			load v5 - v5
+			i := warning_ui
+			sprite v4 v5 3
+		end
+
+		# if we've counted it out
+		if v0 == 9 begin
+			reset_count_master
+
+			r_aci := 0
+			i := attack_creation_index
+			save r_aci - r_aci
+		end
+	end
+
+	if r_aci < c_attack_creation_cap begin
+		# if it's the first tick of a count master:
+		if v1 == 1 begin
+			i := attack_pattern
+			i += v0
+			load v2 - v2
+
+			if v2 != 0 begin
+
+				i := select_height
+				i += v2
+				load v4 - v4
+
+				i := barline_number
+				i += r_aci
+				i += r_aci
+
+				v3 := 80
+
+				save v3 - v4
+
+			end
+
+			r_aci += 1
+			i := attack_creation_index
+			save r_aci - r_aci
+		end
+	end
+	
 	v3 := 0
-
 	loop
 
 		i := barline_number
 		i += v3
-		load v1
+		load v0 - v1
 
 		if v1 == 0 then jump skip_line
 
 		v0 += -1
-
 		if v0 == 0 begin
-			v0 += -32
-
-			#vF := random 0b00000111
-			#v0 += vF
-
-
-			v1 := random 0b00011111
-			i := new_barline_vert
-			i += v1
-			load v1 - v1
+			v0 := 0
+			v1 := 0
+			save v0 - v1
+			jump skip_line
 		end
-
-
+	
 		if v0 == 35 begin
 			i := m_maul_goal
 			vF := 1
-			if v1 == 3 then vF := 2
-			if v1 == 5 then vF := 3
+			if v1 == 5 then vF := 2
+			if v1 == 7 then vF := 3
 			save vF - vF
 		end
 
@@ -246,18 +403,13 @@
 
 		# This makes the bars 'slower':
 		#v0 >>= v0
+		# This makes the bars... faster?
+		#v0 <<= v0
 
 		v2 := v0
 		v4 := 59
 		v5 := v1
 		v5 += -1
-
-		i := warning_ui
-		if v2 >= 128 begin
-			if v2 <= 134 begin
-				sprite v4 v5 3
-			end
-		end
 
 		if v2 < 65 begin
 			i := long thin_bar_line
@@ -304,7 +456,7 @@
 
 	if v0 >= c_show_block_zones begin
 		v1 := 59
-		v2 := 0
+		v2 := 2
 
 		plane 3
 
@@ -333,8 +485,6 @@
 		i := attack_override
 		save v5 - v5
 
-
-		
 	end
 
 	if v0 == 0 then v0 := c_attack_frequency
@@ -343,6 +493,7 @@
 		i := long thin_green_bar_line
 		sprite v1 v2 1
 
+		i := line_less
 		v1 += 8
 		sprite v1 v2 1		
 
@@ -366,7 +517,6 @@
 : attack_line
 0 0
 
-:monitor barline_number 1
 :monitor m_attack_timer 1
 
 : set_player_goal
@@ -376,76 +526,20 @@
 
 
 : new_barline_vert
-1
-3
-5
-1
-3
-5
-1
-3
-5
-1
-3
-5
-1
-3
-5
-1
-3
-5
-1
-3
-5
-1
-3
-5
-1
-3
-5
-1
-3
-5
-1
-3
-5
+3 5 7
+3 5 7
+3 5 7
+3 5 7
+3 5 7
 
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
-1
-4
-7
+3 5 7
+3 5 7
+3 5 7
+3 5 7
+3 5 7
+
+3 5 7
+3 5 7
 
 :const c_player_stance_high 0
 :const c_player_stance_mid 	2
@@ -6623,3 +6717,8 @@ do-32 mac_sprite_address_next
 :byte { TOTAL_ROM_SIZE >> 8 }
 :byte { TOTAL_ROM_SIZE }
 :monitor TOTAL_ROM_SIZE_VALUE "%2i"
+
+: code_bytes_free
+:byte { CODE_POS >> 8 }
+:byte { CODE_POS }
+:monitor code_bytes_free "%2i"
