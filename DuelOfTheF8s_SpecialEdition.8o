@@ -98,8 +98,6 @@
 
 
 
-
-
 : main
 
 	:alias player_frame vD
@@ -112,24 +110,61 @@
 	#get_maul
 	#draw_maul
 
+	reset_count_master
+
 	: game_loop
 
 		clear
 
-		v1 := 0
-		v0 := 0x2 if v0 key then v1 := 1
-		v0 := 0x5 if v0 key then v1 := 2
-		v0 := 0x8 if v0 key then v1 := 3
-		v0 := 0x6 if v0 key then v1 := 4
-		v0 := 0x4 if v0 key then v1 := 5
+		i := game_is_over
+		load vF - vF
+		if vF == 0 begin
 
-		v0 := 0x1 if v0 key then vA := 1
-		v0 := 0x9 if v0 key then vA := 0
+			v1 := 0
+			v0 := 0x2 if v0 key then v1 := 1
+			v0 := 0x5 if v0 key then v1 := 2
+			v0 := 0x8 if v0 key then v1 := 3
+			v0 := 0x6 if v0 key then v1 := 4
+			v0 := 0x4 if v0 key then v1 := 5
 
-		if v1 != 0 then set_player_goal
+			v0 := 0x1 if v0 key then vA := 3
+			v0 := 0x9 if v0 key then vA := 4
+			v0 := 0x3 if v0 key begin
+				i := m_momentum
+				load v0 - v0
+				v0 += -1
+				if v0 == 9 then v0 := 10
+				save v0
+			end
 
-		if vA == 0 then service_barline
-		if vA == 1 then service_attackline
+			if vA == 3 begin
+				i := number_of_attack_patterns_before_passing_to_defend
+				v2 := 4
+				save v2 - v2
+
+				reset_count_master
+				set_count_master_to_attack
+				vA := 1
+			end
+
+			if vA == 4 begin
+				i := number_of_attack_patterns_before_passing_to_attack
+				v2 := 2
+				save v2 - v2
+
+				set_count_master_to_defend
+				reset_count_master
+				vA := 0
+			end
+
+			if v1 != 0 then set_player_goal
+
+			game_governer
+
+
+			if vA == 0 then service_barline
+			if vA == 1 then service_attackline
+		end
 		service_maul
 		service_player
 
@@ -139,6 +174,26 @@
 
 		jump game_loop
 ; 
+
+: game_governer
+	# OK so I want to effectively alternate between an 2 block sequences and an attack sequence.
+	# I've modified barline to use a weird timer thing to cycle an attack pattern in, display it
+	# and shoot it at us
+	# Let's maybe put something in there that follows instructions
+;
+
+: game_is_over
+0
+
+:const c_pattern_count_default 2
+
+:const c_attack_swings_before_next_default 4
+
+: number_of_attack_patterns_before_passing_to_attack
+	:byte c_pattern_count_default
+
+: number_of_attack_patterns_before_passing_to_defend
+	:byte c_attack_swings_before_next_default
 
 : draw_ui
 	i := player_ui
@@ -193,9 +248,53 @@
 	i := line_less
 	sprite v0 v1 1
 	plane 3
+
+	# Let's draw the momentum value onto the screen
+	i := m_momentum
+	load v0
+	# This is a silly bar line that will tell us who's winning the fight
+	# the values for this are 1-30 and 33-63
+	if v0 < 0x80 begin
+		# We draw a red line on the side of the lower saber
+		vF := 0x80
+		v0 =- vF
+
+		v1 := 30
+		v2 := 0
+
+		plane 2
+		i := single_pixel
+
+		loop
+			sprite v1 v2 1
+			v3 := -4
+			v0 += v3
+			v1 += -1
+			if vF != 0 then
+		again
+		plane 3
+	end
+	if v0 > 0x80 begin
+		v0 -= 0x80
+
+
+		v1 := 33
+		v2 := 0
+
+		i := single_pixel
+
+		loop
+			sprite v1 v2 1
+			v3 := -4
+			v0 += v3
+			v1 += 1
+			if vF != 0 then
+		again
+	end
 ;
 
 : single_pixel
+0x80
 0x80
 : line_h
 0xFF
@@ -262,16 +361,21 @@
 :monitor count_master 2
 
 : attack_creation_index
-8
+16
 
 : attack_pattern
 0 0 0 0 0 0 0 0
 0 0 0 0 0 0 0 0
 
+: reset_attack_pattern
+0 0 0 0 0 0 0 0
+
 : test_pattern
 1 0 2 0 3 0 2 0
 
+# Game plays slightly faster while attacking?
 :const c_count_master_sub 20
+:const c_count_master_atk 16
 
 :const c_attack_creation_cap 16
 :const c_attack_creation_next_wave 16
@@ -294,6 +398,25 @@
 	load v1
 
 	if r_aci == c_attack_creation_next_wave begin
+
+		i := number_of_attack_patterns_before_passing_to_attack
+		load v2 - v2
+
+		if v2 == 0 begin
+			v2 := c_pattern_count_default
+			save v2 - v2
+
+			# If we should pass over to attacks
+			vA := 1
+			# Reset the counter
+			set_count_master_to_attack
+			reset_count_master
+			return
+		end
+
+		v2 += -1
+		save v2 - v2
+
 		# the pattern has finished?
 		i := test_pattern
 		load v7
@@ -304,19 +427,10 @@
 		r_aci := c_attack_creation_next_wave_plus
 		save r_aci - r_aci
 
-		# Reset the counter?
+		# We do this here to preserve v0 and v1 as being the counter:
+		# Reset the counter
 		reset_count_master
 	end
-
-	v1 += 1
-
-	if v1 == c_count_master_sub begin
-		v1 := 0
-		v0 += 1
-	end
-
-	i := count_master
-	save v1
 
 	if r_aci == c_attack_creation_next_wave_plus begin
 		i := attack_pattern
@@ -345,7 +459,8 @@
 
 	if r_aci < c_attack_creation_cap begin
 		# if it's the first tick of a count master:
-		if v1 == 1 begin
+
+		if v1 == 0 begin
 			i := attack_pattern
 			i += v0
 			load v2 - v2
@@ -371,6 +486,8 @@
 			save r_aci - r_aci
 		end
 	end
+
+	inc_count_master
 	
 	v3 := 0
 	loop
@@ -389,7 +506,12 @@
 			jump skip_line
 		end
 	
-		if v0 == 35 begin
+		# This is some weird magic number thing I'm doing to make the attack bar line up:
+		:calc maul_attack_trigger {
+			43 - 8 * 2
+		}
+
+		if v0 == maul_attack_trigger begin
 			i := m_maul_goal
 			vF := 1
 			if v1 == 5 then vF := 2
@@ -401,10 +523,17 @@
 		i += v3
 		save v1
 
+		# This is the scoring region:
+		if v0 >= 4 begin
+			if v0 <= 8 begin
+				add_block_score
+			end
+		end
+
 		# This makes the bars 'slower':
 		#v0 >>= v0
 		# This makes the bars... faster?
-		#v0 <<= v0
+		v0 <<= v0
 
 		v2 := v0
 		v4 := 59
@@ -426,6 +555,9 @@
 
 			plane 3
 			sprite v2 v1 1
+
+			:monitor v0 1
+			
 		end
 
 		: skip_line
@@ -436,10 +568,49 @@
 	again
 ;
 
-:const c_attack_frequency 32
-:const c_show_block_zones 20
+: set_count_master_to_defend
+	i := smc_count_master_value
+	vF := c_count_master_sub
+	save vF - vF
 
-:const c_attack_time 20
+	i := reset_attack_pattern
+	load v3
+	i := barline_number
+	save v3
+	save v3
+	save v3
+	save v3
+
+	i := attack_pattern
+	save v3
+	save v3
+	save v3
+	save v3
+;
+
+: set_count_master_to_attack
+	i := smc_count_master_value
+	vF := c_count_master_atk
+	save vF - vF
+;
+
+: inc_count_master
+	v1 += 1
+
+	:next smc_count_master_value
+	if v1 == c_count_master_sub begin
+		v1 := 0
+		v0 += 1
+	end
+
+	i := count_master
+	save v1
+;
+
+:monitor smc_count_master_value 1 
+
+#:const c_show_block_zones 20
+#:const c_attack_time 20
 
 : m_attack_timer
 64
@@ -449,66 +620,88 @@
 	load v5 - v5
 	# this will be the line we attack in?
 
-	i := m_attack_timer
-	load v0
 
-	v0 += -1
+	# Let's use Count Master instead to attack with, mayhap?
+	i := count_master
+	load v1
 
-	if v0 >= c_show_block_zones begin
-		v1 := 59
-		v2 := 2
+	# Pull out if we're a 0 or a 1 count in the master:
+	v4 := 0x1
+	v4 &= v0
 
-		plane 3
-
-		i := short_warning_ui
-		sprite v1 v2 2
-		v2 += 2
-		sprite v1 v2 2
-		v2 += 2
-		i := warning_ui
-		sprite v1 v2 3
+	if v0 == 24 begin
+		# If we should pass over to defend
+		vA := 0
+		set_count_master_to_defend
+		# Reset the counter
+		reset_count_master
+		return
 	end
 
-	i := attack_line
-	load v1 - v2
+	if v0 < 16 begin
+		if v4 == 0 begin
+			v2 := 59
+			v3 := 2
 
-	if v0 == c_attack_time begin
-		v1 := 1
-		i := select_height
-		i += v5
-		load v2 - v2
+			plane 3
 
-		# set player state to attack based on their goal number
-		# their goal number is in v5 right now
-		# Well goal probably is wrong because you can overwrite it with your button push but this is fine
+			i := short_warning_ui
+			sprite v2 v3 2
+			v3 += 2
+			sprite v2 v3 2
+			v3 += 2
+			i := warning_ui
+			sprite v2 v3 3
+		end
+		if v0 >= 8 begin
+			if v4 == 1 begin
+				if v1 == 0 begin
+					# Get the height that corresponds:
+					i := select_height
+					i += v5
+					load v3 - v3
 
-		i := attack_override
-		save v5 - v5
+					# And set the attack line value to match (this line must finish rendering as we only
+					# have the one of them:
+					i := attack_line
+					v2 := 0
+					save v2 - v3
 
-	end
+					# set player state to attack based on their goal number
+					# their goal number is in v5 right now
+					# Well goal probably is wrong because you can overwrite it with your button push but this is fine
 
-	if v0 == 0 then v0 := c_attack_frequency
-
-	if v2 != 0 begin
-		i := long thin_green_bar_line
-		sprite v1 v2 1
-
-		i := line_less
-		v1 += 8
-		sprite v1 v2 1		
-
-		if v1 == 57 begin
-			v1 := 0
-			v2 := 0
+					i := attack_override
+					save v5 - v5
+				end
+			end
 		end
 	end
 
+	# If we're on the off beat of the attack cycle
+	# And we've only just started
+
+	inc_count_master
+
 	i := attack_line
-	save v1 - v2
+	load v2 - v3
 
-	i := m_attack_timer
-	save v0
+	if v3 != 0 begin
+		i := long thin_green_bar_line
+		sprite v2 v3 1
 
+		i := line_less
+		v2 += 8
+		sprite v2 v3 1		
+
+		if v2 == 56 begin
+			v2 := 0
+			v3 := 0
+		end
+
+		i := attack_line
+		save v2 - v3
+	end
 ;
 
 : attack_override
@@ -656,12 +849,59 @@ jump player_handle_lowack			# 26
 :const player_breath_cycle 32
 :const c_player_stance_change_count 2
 
+: reset_attack_override
+	i := attack_override
+	r_attack_override := 0
+	save r_attack_override - r_attack_override
+;
+
+: add_block_score
+	# The player gets 5 instances of blocking points per round
+	# More blocks is better
+	# At this time, we don't know if we've actually successfully blocked
+	# of if we've missed it
+	# I'm just going tos core based on the player selecting the spot, rather than the animation
+
+	# At this time, v0 and v1 should contain the information we need about the attack barline that
+	# is crossing us
+	# v0 is the horrizontal position and must be left in tact
+	# v1 is the vertical line of the sprite
+	# v2 is up for grabs
+	# r_player_goal is currently v6 which should also be fine
+	i := m_player_goal
+	load r_player_goal - r_player_goal
+	i := select_height
+	i += r_player_goal
+	load v2 - v2
+
+	# We're either getting +1 or -1 point for this
+	vF := -2
+	if v1 == v2 begin
+		vF := 1
+	end
+
+	score_momentum
+;
+
+: m_momentum
+128
+
+: score_momentum
+	i := m_momentum
+	load v2 - v2
+	v2 += vF
+
+	if v2 < 10 then v2 := 10
+	if v2 > 245 then v2 := 245
+
+	save v2 - v2
+;
+
+:monitor m_momentum 1
 
 : player_handle_stance_high
 	if r_attack_override != 0 begin
-		i := attack_override
-		r_attack_override := 0
-		save r_attack_override - r_attack_override
+		reset_attack_override
 
 		r_player_cur_stance := c_player_stance_highack
 		jump new_service_player_value
@@ -684,6 +924,10 @@ jump player_handle_lowack			# 26
 	end
 
 	if r_player_goal == 5 begin
+		i := wait_for_player_death_sync
+		vF := 0
+		save vF - vF
+
 		r_player_cur_stance := c_player_stance_highfail
 		jump new_service_player_value
 	end
@@ -705,9 +949,7 @@ jump player_handle_lowack			# 26
 
 : player_handle_stance_mid
 	if r_attack_override != 0 begin
-		i := attack_override
-		r_attack_override := 0
-		save r_attack_override - r_attack_override
+		reset_attack_override
 
 		r_player_cur_stance := c_player_stance_midack
 		jump new_service_player_value
@@ -734,6 +976,10 @@ jump player_handle_lowack			# 26
 	end
 
 	if r_player_goal == 5 begin
+		i := wait_for_player_death_sync
+		vF := 0
+		save vF - vF
+
 		r_player_cur_stance := c_player_stance_midfail
 		jump new_service_player_value
 	end
@@ -752,9 +998,7 @@ jump player_handle_lowack			# 26
 
 : player_handle_stance_low
 	if r_attack_override != 0 begin
-		i := attack_override
-		r_attack_override := 0
-		save r_attack_override - r_attack_override
+		reset_attack_override
 
 		r_player_cur_stance := c_player_stance_lowack
 		jump new_service_player_value
@@ -776,6 +1020,10 @@ jump player_handle_lowack			# 26
 	end
 
 	if r_player_goal == 5 begin
+		i := wait_for_player_death_sync
+		vF := 0
+		save vF - vF
+
 		r_player_cur_stance := c_player_stance_lowfail
 		jump new_service_player_value
 	end
@@ -951,6 +1199,8 @@ jump player_handle_lowack			# 26
 		r_player_goal := 2
 		save r_player_goal - r_player_goal
 
+		reset_gameplay_vars
+
 		r_player_cur_stance := c_player_stance_mid
 		jump new_service_player_value
 	end
@@ -1065,6 +1315,28 @@ jump player_handle_lowack			# 26
 
 ;
 
+: reset_gameplay_vars
+	i := game_is_over
+	vF := 0
+	save vF - vF
+
+	i := m_momentum
+	vF := 0x80
+	save vF - vF
+
+	reset_count_master
+
+	i := number_of_attack_patterns_before_passing_to_attack
+	v2 := 2
+	save v2 - v2
+
+	set_count_master_to_defend
+
+	vA := 0
+
+
+
+;
 
 
 : last_true_player_frame
@@ -1282,13 +1554,13 @@ jump maul_handle_lowblock			# 26
 	i := m_maul_goal
 	load vF - vF
 
+	# NB this only works because Mauls go first :3
 	if r_attack_override != 0 begin
+		vF := r_player_cur_stance
 		if r_attack_override == 1 then r_player_cur_stance := c_maul_highblock
 		if r_attack_override == 2 then r_player_cur_stance := c_maul_midblock
 		if r_attack_override == 3 then r_player_cur_stance := c_maul_lowblock
-
-		jump new_service_maul_value
-
+		if vF != r_player_cur_stance then jump new_service_maul_value
 	end
 
 	if vF != 0 begin
@@ -1336,7 +1608,14 @@ jump maul_handle_lowblock			# 26
 	maul_standard_30fps
 
 	if r_player_stance_frame == 10 begin
+		# this is the moment that the player should be killed, if they are losing:
+		i := m_momentum
+		load vF - vF
 		r_player_cur_stance := c_maul_lowswingend
+		if vF == 10 begin
+			r_player_cur_stance := c_maul_lowswingkill
+			jump kill_player
+		end
 		jump new_service_maul_value
 	end
 
@@ -1365,6 +1644,12 @@ jump maul_handle_lowblock			# 26
 : maul_handle_lowswingkill
 	maul_standard_30fps
 
+	# if the memory address for delaying to wait on the player is set
+	# we want to lock our frame step to 1
+	i := wait_for_player_death_sync
+	load vF - vF
+	if vF == 1 then r_player_stance_step := 1
+
 	if r_player_stance_frame == 4 begin
 		r_player_cur_stance := c_maul_sharedkill
 		jump new_service_maul_value
@@ -1381,7 +1666,13 @@ jump maul_handle_lowblock			# 26
 	maul_standard_30fps
 
 	if r_player_stance_frame == 10 begin
+		i := m_momentum
+		load vF - vF
 		r_player_cur_stance := c_maul_midswingend
+		if vF == 10 begin
+			r_player_cur_stance := c_maul_midswingkill
+			jump kill_player
+		end
 		jump new_service_maul_value
 	end
 
@@ -1410,6 +1701,12 @@ jump maul_handle_lowblock			# 26
 : maul_handle_midswingkill
 	maul_standard_30fps
 
+	# if the memory address for delaying to wait on the player is set
+	# we want to lock our frame step to 1
+	i := wait_for_player_death_sync
+	load vF - vF
+	if vF == 1 then r_player_stance_step := 1
+
 	if r_player_stance_frame == 4 begin
 		r_player_cur_stance := c_maul_sharedkill
 		jump new_service_maul_value
@@ -1426,7 +1723,13 @@ jump maul_handle_lowblock			# 26
 	maul_standard_30fps
 
 	if r_player_stance_frame == 9 begin
+		i := m_momentum
+		load vF - vF
 		r_player_cur_stance := c_maul_highswingend
+		if vF == 10 begin
+			r_player_cur_stance := c_maul_highswingkill
+			jump kill_player
+		end
 		jump new_service_maul_value
 	end
 
@@ -1454,6 +1757,12 @@ jump maul_handle_lowblock			# 26
 
 : maul_handle_highwingkill
 	maul_standard_30fps
+
+	# if the memory address for delaying to wait on the player is set
+	# we want to lock our frame step to 1
+	i := wait_for_player_death_sync
+	load vF - vF
+	if vF == 1 then r_player_stance_step := 1
 
 	if r_player_stance_frame == 4 begin
 		r_player_cur_stance := c_maul_sharedkill
@@ -1561,7 +1870,32 @@ jump maul_handle_lowblock			# 26
 	draw_maul
 ;
 
+: wait_for_player_death_sync
+0
 
+: kill_player
+	# We have reached the point where the player is going to 'die', due to having lost all momentum
+
+	# We want to block player input:
+
+	i := game_is_over
+	vF := 1
+	save vF - vF
+
+	# Maul will have had his animation set up already
+	# We do however need to do the player in
+	# We can do this by setting player goal 5; this will sync their animation up correctly
+	# but they might be mid animation unfortunately so this will desync the two characters. Let's try it:
+	vF := 5
+	i := m_player_goal
+	save vF - vF
+
+	i := wait_for_player_death_sync
+	vF := 1
+	save vF - vF
+
+
+	jump new_service_maul_value
 
 
 
