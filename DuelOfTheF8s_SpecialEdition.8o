@@ -86,17 +86,19 @@
 # DONE 1) Create attack sequence where we can message with traffic lights that
 # something will or won't be blocked
 # DONE 2) Create animations that accompany this
-# DONE-ISH 3) Integrate both sides of the game with one another and add a 'momentum bar'?
-# 4) Allow the game to be 'lost'
-# 5) Allow the game to detect the player earning an attack sequence
+# DONE 3) Integrate both sides of the game with one another and add a 'momentum bar'?
+# DONE 4) Allow the game to be 'lost'
+# DONE? Sequencing? 5) Allow the game to detect the player earning an attack sequence
 # 6) Reintegrate the original opening cutscenes
 # 7) Add a new ending cutscene?
-# 8) Add new Maul attacks that are hader to block
+# 8) Add new Maul attacks that are harder to block
 # 9) Add funny text things for what saves you
 
 
 
+:const c_pattern_count_default 2
 
+:const c_attack_swings_before_next_default 4
 
 : main
 
@@ -124,17 +126,18 @@
 			v0 := 0x2 if v0 key then v1 := 1
 			v0 := 0x5 if v0 key then v1 := 2
 			v0 := 0x8 if v0 key then v1 := 3
-			v0 := 0x6 if v0 key then v1 := 4
-			v0 := 0x4 if v0 key then v1 := 5
+			#v0 := 0x6 if v0 key then v1 := 4
+			#v0 := 0x4 if v0 key then v1 := 5
 
 			v0 := 0x1 if v0 key then vA := 3
 			v0 := 0x9 if v0 key then vA := 4
 			v0 := 0x3 if v0 key begin
-				i := m_momentum
-				load v0 - v0
-				v0 += -1
-				if v0 == 9 then v0 := 10
-				save v0
+				vF := -1
+				score_momentum
+			end
+			v0 := 0xC if v0 key begin
+				vF := 1
+				score_momentum
 			end
 
 			if vA == 3 begin
@@ -149,7 +152,7 @@
 
 			if vA == 4 begin
 				i := number_of_attack_patterns_before_passing_to_attack
-				v2 := 2
+				v2 := c_pattern_count_default
 				save v2 - v2
 
 				set_count_master_to_defend
@@ -170,6 +173,8 @@
 
 		draw_ui
 
+		service_screen_shaker
+
 		q_delay
 
 		jump game_loop
@@ -184,10 +189,6 @@
 
 : game_is_over
 0
-
-:const c_pattern_count_default 2
-
-:const c_attack_swings_before_next_default 4
 
 : number_of_attack_patterns_before_passing_to_attack
 	:byte c_pattern_count_default
@@ -249,9 +250,33 @@
 	sprite v0 v1 1
 	plane 3
 
+	i := game_progress
+	load vF - vF
+
+	i := m_momentum_limit_indicator_x
+	i += vF
+	load vF - vF
+
+	if vF != 0 begin
+		i := momentum_limit_indicator
+		v0 := 1
+		sprite vF v0 2
+	end
+
+	i := m_display_momentum
+	load v1 - v1
+
 	# Let's draw the momentum value onto the screen
 	i := m_momentum
 	load v0
+
+	if v1 > v0 then v1 -= 1
+	if v1 < v0 then v1 += 1
+
+	i := m_display_momentum
+	save v1 - v1
+	v0 := v1
+
 	# This is a silly bar line that will tell us who's winning the fight
 	# the values for this are 1-30 and 33-63
 	if v0 < 0x80 begin
@@ -273,6 +298,7 @@
 			if vF != 0 then
 		again
 		plane 3
+		return
 	end
 	if v0 > 0x80 begin
 		v0 -= 0x80
@@ -291,7 +317,16 @@
 			if vF != 0 then
 		again
 	end
+
+
 ;
+
+: momentum_limit_indicator
+0b00000000
+0b11100000
+0b01000000
+0b11100000
+
 
 : single_pixel
 0x80
@@ -372,6 +407,14 @@
 
 : test_pattern
 1 0 2 0 3 0 2 0
+2 0 3 0 2 0 3 0
+1 0 0 3 0 1 0 2
+0 2 0 1 0 3 0 2
+3 0 2 0 1 0 3 0
+2 0 1 0 3 0 2 0
+1 0 3 0 1 0 3 0
+2 0 3 0 1 0 2 0
+3 0 1 0 1 0 3 0
 
 # Game plays slightly faster while attacking?
 :const c_count_master_sub 20
@@ -406,11 +449,25 @@
 			v2 := c_pattern_count_default
 			save v2 - v2
 
+			i := m_last_attack_spot
+			v2 := 0
+			save v2 - v2
+
 			# If we should pass over to attacks
 			vA := 1
 			# Reset the counter
 			set_count_master_to_attack
 			reset_count_master
+
+			# We want to like, give the player a green attack bonus when they have momentum
+			# As that's how we're going to judge game progress progression and winning
+
+			# If the player has momentum, we want to add a green target to the last hit
+			# of the attack sequence
+			# If they're at cap when they hit it, they progress
+
+			create_game_progress_targets
+
 			return
 		end
 
@@ -419,6 +476,16 @@
 
 		# the pattern has finished?
 		i := test_pattern
+
+		v0 := random 0b111
+		v1 := 8
+		loop
+			if v0 == 0 then jump exit_pattern_loop
+			i += v1
+			v0 -= 1
+		again
+		: exit_pattern_loop
+
 		load v7
 		i := attack_pattern
 		save v7
@@ -615,6 +682,31 @@
 : m_attack_timer
 64
 
+: vulnerable_attack_lane
+0
+
+: create_game_progress_targets
+	# clear current lane:
+	i := vulnerable_attack_lane
+	vF := 0
+	save vF - vF
+
+	i := m_momentum
+	load v7 - v7
+
+	if v7 > 0x80 begin
+		v7 := random 0b00011111
+		i := new_barline_vert
+		i += v7
+		load v7 - v7
+
+		i := vulnerable_attack_lane
+		save v7 - v7
+	end
+;
+
+:monitor vulnerable_attack_lane 1
+
 : service_attackline
 	i := m_player_goal
 	load v5 - v5
@@ -640,18 +732,84 @@
 
 	if v0 < 16 begin
 		if v4 == 0 begin
-			v2 := 59
-			v3 := 2
-
 			plane 3
+			v2 := 59
+
+			# We eliminate attack spots if they were hit last turn
+
+			v7 := 0
+			i := vulnerable_attack_lane
+			if v0 == 6 then load v7 - v7
+			if v0 == 14 then load v7 - v7
+
+			if v0 >= 8 begin
+				i := m_last_attack_spot	
+				# Repurposing v4:
+				load v4 - v4
+				i := short_warning_ui
+
+				if v4 == 0 then jump all_attack_lines_are_good
+
+				if v4 == 1 begin
+					v3 := 4
+					sprite v2 v3 2
+					i := warning_ui
+					v3 += 2
+					sprite v2 v3 3
+				end
+				if v4 == 2 begin
+					v3 := 2
+					i := warning_ui
+					sprite v2 v3 3
+					v3 += 4
+					sprite v2 v3 3
+				end
+				if v4 == 3 begin
+					v3 := 2
+					sprite v2 v3 2
+					i := warning_ui
+					v3 += 2
+					sprite v2 v3 3
+				end
+
+				# We want to green up the vulnerable lane but only if they didn't attack it last
+				# Let's figure this out then arug
+				if v7 != 0 begin
+					i := select_height
+					i += v4
+					load v4 - v4
+					if v7 != v4 begin
+						i := green_warning_ui
+						plane 1
+						v3 := v7
+						v3 -= 1
+						sprite v2 v3 3
+						plane 3
+					end
+				end
+
+				jump exit_warning_if_statement
+			end
+			: all_attack_lines_are_good
 
 			i := short_warning_ui
+
+			v3 := 2
 			sprite v2 v3 2
 			v3 += 2
 			sprite v2 v3 2
 			v3 += 2
 			i := warning_ui
 			sprite v2 v3 3
+
+			if v7 != 0 begin
+				i := green_warning_ui
+				plane 1
+				v3 := v7
+				v3 -= 1
+				sprite v2 v3 3
+				plane 3
+			end
 		end
 		if v0 >= 8 begin
 			if v4 == 1 begin
@@ -673,10 +831,18 @@
 
 					i := attack_override
 					save v5 - v5
+
+					i := m_last_attack_spot
+					# we want this but we're loading it to replace it in a moment
+					load v2 - v2
+					save v5 - v5
+
+					add_attack_score
 				end
 			end
 		end
 	end
+	: exit_warning_if_statement
 
 	# If we're on the off beat of the attack cycle
 	# And we've only just started
@@ -883,21 +1049,102 @@ jump player_handle_lowack			# 26
 	score_momentum
 ;
 
+: add_attack_score
+	# Attacks on weak points give more
+	# v2 is the last attack spot
+	# v3 is the height of our line that we attacked with
+	# v5 is the goal value
+
+	if v0 == 15 begin
+
+		i := vulnerable_attack_lane
+		load v7 - v7
+
+		if v3 == v7 begin
+
+			i := m_momentum_limit
+			load v3 - v3
+			i := m_momentum
+			load v6 - v6
+
+			v3 -= 10
+
+			if v6 >= v3 begin
+				set_screen_shaker
+	 			i := game_progress
+	 			load v3 - v3
+	 			v3 += 1
+	 			save v3 - v3
+
+	 			i := m_momentum
+	 			v3 := 64
+	 			save v3 - v3
+
+	 			score_momentum
+	 			return
+			end
+			vF := 2
+			set_custom_screen_shake
+
+			# points for a normal vuln hit:
+			vF := 10
+		end
+	end
+
+	vF := 5
+	if v2 == v5 then vF := -5
+
+	score_momentum
+;
+
+: m_last_attack_spot
+0
+
 : m_momentum
+64
+
+: m_display_momentum
 128
+
+: game_progress
+0
+
+: m_momentum_limit
+170
+
+: m_momentum_limits
+ 170
+ 200
+ 245
+
+: m_momentum_limit_indicator_x
+42 50 0
 
 : score_momentum
 	i := m_momentum
 	load v2 - v2
 	v2 += vF
 
-	if v2 < 10 then v2 := 10
-	if v2 > 245 then v2 := 245
+	i := game_progress
+	load v7 - v7
 
+	i := m_momentum_limits
+	i += v7
+	load v7 - v7
+
+	i := m_momentum_limit
+	save v7 - v7
+
+	if v2 < 10 then v2 := 10
+	if v2 > v7 then v2 := v7
+
+
+	i := m_momentum
 	save v2 - v2
 ;
 
 :monitor m_momentum 1
+:monitor m_momentum_limit 1
 
 : player_handle_stance_high
 	if r_attack_override != 0 begin
@@ -1194,6 +1441,10 @@ jump player_handle_lowack			# 26
 
 	player_standard_30fps
 
+	if r_player_stance_frame == 18 begin
+		if r_player_stance_step == 1 then set_screen_shaker
+	end 
+
 	if r_player_stance_frame == 54 begin
 		i := m_player_goal
 		r_player_goal := 2
@@ -1327,15 +1578,12 @@ jump player_handle_lowack			# 26
 	reset_count_master
 
 	i := number_of_attack_patterns_before_passing_to_attack
-	v2 := 2
+	v2 := c_pattern_count_default
 	save v2 - v2
 
 	set_count_master_to_defend
 
 	vA := 0
-
-
-
 ;
 
 
@@ -1898,8 +2146,48 @@ jump maul_handle_lowblock			# 26
 	jump new_service_maul_value
 
 
+: m_screen_shake_vars
+: m_screen_shake_count
+	0 
+: m_screen_shake_range
+	  0 0 0
 
 
+: set_screen_shaker
+	vF := 8
+: set_custom_screen_shake
+	i := m_screen_shake_count
+	# 8 counts of:
+	save vF - vF
+	i := m_screen_shake_range
+	# 2 frames up and 2 frames down:
+	vF := 4
+	save vF - vF
+;
+
+
+: service_screen_shaker
+	i := m_screen_shake_vars
+	load v0 - v1
+
+	if v0 == 0 then return
+
+	v1 += -1
+	if v1 >= 2 begin
+		if v1 == 3 begin
+			buzzer := v1
+		end
+		scroll-up 1
+	end
+
+	if v1 == -1 begin
+		v0 += -1
+		v1 := 4
+
+	end
+
+	save v0 - v1
+;
 
 : q_delay
 	vf := 1
@@ -2072,11 +2360,11 @@ to-data
 2
 2
 2
-8
-2
-2
-2
-2
+64
+4
+4
+4
+4
 2
 2
 2
@@ -2217,11 +2505,11 @@ to-data
 2     # 71
 2     # 72
 2     # 73
-8     # 74
-2     # 75
-2     # 76
-2     # 77
-2     # 78
+64     # 74
+4     # 75
+4     # 76
+4     # 77
+4     # 78
 2     # 79
 2     # 80
 2     # 81
