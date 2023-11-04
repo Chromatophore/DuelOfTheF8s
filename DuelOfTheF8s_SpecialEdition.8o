@@ -23,7 +23,7 @@
 # Some of my standard Macros for meeeee:
 :calc CODE_POS { 0x200  }
 :calc EX_CODE_POS { 0x0000 }
-:calc DATA_POS { 0x1210 }
+:calc DATA_POS { 0x1200 }
 
 :macro to-code { :calc DATA_POS { HERE }  :org { CODE_POS } }
 :macro to-data { :calc CODE_POS { HERE }  :org { DATA_POS } }
@@ -48,6 +48,39 @@
 :calc maul_default_x_pos { 27 }
 
 :const c_long_delay_time 0x0A
+
+# Copy Reference Bank Switching Code:
+# This code works by assembling in place, at address 0+, then copying to high memory
+# Then we overwrite the sub 0x200 (we are permitted to rewrite this area while assembling)
+# This is close to how I'm already bank swapping the level select in my previous method
+
+:macro bank_init LABEL {
+	: LABEL
+	:calc bank_dst { HERE }
+	:org 0
+}
+:stringmode copy "A" { :byte { @ HERE - bank_dst } }
+:stringmode copy "B" { copy "AAAAAAAAAAAAAAAA" }
+:macro bank_end {
+	:org bank_dst
+	copy "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+}
+
+# bank_load is positioned later:
+
+:macro bank_switch BANK {
+	i := long bank_stash
+	save vF
+	:unpack long BANK
+	bank_load
+}
+
+
+:stringmode text " abcdefghijklmnopqrstuvwxyz0123456789.!?,'_\"%*=@-" { :byte { VALUE * 5 } }
+:stringmode text "\0"                               { :byte -1 }
+:stringmode text "^"                                { :byte -2 }
+
+
 
 # OK, What are my objectives with this game.
 # My first objective must be to have control of my main character with
@@ -118,6 +151,10 @@
 
 : main
 
+	bank_switch BNK_single_lomem
+
+	plane 3
+	clear
 	i := long m_maul_handle_introduction_vars
 	load v3
 	i := m_maul_shared_anim_vars
@@ -125,11 +162,11 @@
 
 	draw_logo
 	if v0 == 1 then jump skip_to_game
+	if v0 == 0xA then jump maximaul_mode
 	hires
 	clear
 
-
-
+	#jump ending_sequence
 	#jump skip_to_wall
 	#jump dont_do_the_text_yet
 
@@ -262,7 +299,7 @@
 	: skip_to_wall
 	vD := 6
 	i_delay
-	auto_text intro_7_1 37 23
+	auto_text intro_7_1 37 20
 	vF := 0x20
 	f_delay
 	auto_text intro_7_2 1 29
@@ -334,7 +371,7 @@
 	vA := 6
 
 	: game_loop
-
+		# Just another redraw the entire game each frame game
 		clear
 
 		i := game_is_over
@@ -347,20 +384,20 @@
 			v0 := 0x8 if v0 key then v1 := 3
 
 
-			v0 := 0x6 if v0 key then v1 := 4
-			v0 := 0x4 if v0 key then v1 := 5
+			#v0 := 0x6 if v0 key then v1 := 4
+			#v0 := 0x4 if v0 key then v1 := 5
 
-			v0 := 0xC if v0 key then v1 := 10
-			v0 := 0xD if v0 key then v1 := 11
-			v0 := 0xE if v0 key then v1 := 12
-			v0 := 0xF if v0 key then v1 := 13
+			#v0 := 0xC if v0 key then v1 := 10
+			#v0 := 0xD if v0 key then v1 := 11
+			#v0 := 0xE if v0 key then v1 := 12
+			#v0 := 0xF if v0 key then v1 := 13
 
-			if v1 > 9 begin
-				i := m_maul_goal
-				v1 -= 10
-				save v1 - v1
-				v1 := 0
-			end
+			#if v1 > 9 begin
+			#	i := m_maul_goal
+			#	v1 -= 10
+			#	save v1 - v1
+			#	v1 := 0
+			#end
 
 
 			#v0 := 0x1 if v0 key then vA := 3
@@ -396,9 +433,6 @@
 
 			if v1 != 0 then set_player_goal
 
-			game_governer
-
-
 			if vA == 6 begin
 				i := count_master
 				load v1
@@ -418,8 +452,12 @@
 
 		q_delay
 
+		i := game_is_over
+		load v0
+		if v0 != 250 then
 		jump game_loop
-; 
+
+	jump ending_sequence
 
 : intro_wait
 	v2 := 116
@@ -435,29 +473,6 @@
 		if v0 key then
 	again
 	sprite v2 v3 8
-;
-
-: draw_logo
-	lores
-	clear
-	plane 1
-	# draw logo:
-	i := long logo2
-	v0 := 0
-	v2 := 32
-
-	loop
-		v1 := 0
-		sprite v0 v1 0
-		i += v2
-		v1 := 16
-		sprite v0 v1 0
-		i += v2
-		v0 += 16
-		if v0 != 64 then
-	again
-
-	v0 := key
 ;
 
 # DrawText 0xFF means end. 0xFE means carriage return
@@ -479,9 +494,15 @@
 	# Test for control chars:
 	if v0 == -1 begin
 		# we've reached the end
+		# Export out the last character:
+		v1 := vF
 		vf := -1
 		return
 		end
+	if v0 == -2 begin
+		vF := -2
+		return
+	end
 	# Step on character pointer while we're here
 	vf += 1
 	# Detect carriage return:
@@ -522,13 +543,6 @@
 	auto_text intro_5_2 1 11
 	i_delay
 	auto_text intro_5_3 16 17
-;
-
-: game_governer
-	# OK so I want to effectively alternate between an 2 block sequences and an attack sequence.
-	# I've modified barline to use a weird timer thing to cycle an attack pattern in, display it
-	# and shoot it at us
-	# Let's maybe put something in there that follows instructions
 ;
 
 : draw_theed_power_wall	
@@ -674,6 +688,9 @@
 
 	i := game_progress
 	load vF - vF
+
+	# if we've won the game:
+	if vF == 3 then return
 
 	i := m_momentum_limit_indicator_x
 	i += vF
@@ -838,8 +855,9 @@ to-data
 : reset_attack_pattern
 0 0 0 0 0 0 0 0 0 0
 
+
+# advance 64 for each game progression
 : test_pattern
-3 2 3 0 3 0 2 1
 2 0 3 0 2 0 3 0
 1 0 0 3 0 1 0 2
 0 2 0 1 0 3 0 2
@@ -848,6 +866,25 @@ to-data
 1 0 3 0 1 0 3 0
 2 0 3 0 1 0 2 0
 3 0 1 0 1 0 3 0
+: progress_1_patterns
+1 3 2 0 1 0 2 0
+3 1 3 0 2 3 1 0
+2 1 0 3 1 0 2 1
+1 2 3 0 0 3 2 1
+2 3 2 0 1 3 1 0
+3 2 0 1 3 2 0 2
+1 0 2 3 1 0 2 1
+2 1 2 0 0 3 1 2
+: progress_2_pattern
+1 3 2 3 1 2 0 1
+2 1 2 1 3 2 1 3
+3 2 3 1 3 0 2 1
+1 2 1 3 2 1 3 2
+2 3 2 1 3 2 1 3
+3 1 0 2 1 3 2 3
+1 0 2 1 3 2 3 1
+2 1 3 2 3 1 3 2
+
 
 to-code
 
@@ -857,11 +894,14 @@ to-code
 
 
 :const c_attack_actual_creation_cap 9
+:const c_attack_actual_creation_cap_for_uh_reset_or_something 10
 :const c_attack_actual_creation_cap_double 18
 
 :const c_attack_creation_cap 16
 :const c_attack_creation_next_wave 16
 :const c_attack_creation_next_wave_plus 18
+
+:const c_attack_display_limit 9
 
 
 : attack_creation_index
@@ -888,22 +928,27 @@ to-code
 	i := count_master
 	load v1
 
+	:next smc_hard_mode_faster_pattern_creation
 	if r_aci == c_attack_creation_next_wave begin
+		# but we should always have at LEAST once defence wave
+		# We should also skip to the next attack sequence if momentum is maxed out
+
 
 		i := number_of_attack_patterns_before_passing_to_attack
 		load v2 - v2
 
+
+
 		# This transfers us to attack mode:
 		if v2 == 0 begin
-
+			: skip_last_defence_wave_if_max
 			# First: reset defence mode:
 			v2 := c_pattern_count_default
 			save v2 - v2
 
 			i := game_progress
 			load vF - vF
-			vF += 1
-			i := attack_waves_remaining
+			i := extra_attack_waves_remaining
 			save vF - vF
 
 			begin_attack_wave
@@ -914,14 +959,32 @@ to-code
 		v2 += -1
 		save v2 - v2
 
+		i := m_momentum_limit
+		load vB - vB
+		i := m_momentum
+		load vC - vC
+
+		if vB == vC begin
+			i := number_of_attack_patterns_before_passing_to_attack
+			if v2 == 0 then jump skip_last_defence_wave_if_max
+		end
+
 		# the pattern has finished, so, let's pick a new one:
 		# 
+
+		i := game_progress
+		: smc_hard_mode_always_hard_patterns
+		load vF - vF
+
+		v1 := 0
+		if vF == 1 then v1 := 64
+		if vF == 2 then v1 := 128
+
 		i := long test_pattern
+		i += v1
 
 		v0 := random 0b111
 		v1 := 8
-		# TODO disables pattern select
-		v1 := 0
 		loop
 			if v0 == 0 then jump exit_pattern_loop
 			i += v1
@@ -936,6 +999,7 @@ to-code
 
 		# Step forward to the next step and reset the timer:
 		i := attack_creation_index
+		:next smc_instant_attack_sequence_a
 		r_aci := c_attack_creation_next_wave_plus
 		save r_aci - r_aci
 
@@ -944,32 +1008,36 @@ to-code
 		reset_count_master
 	end
 
-	if r_aci == c_attack_creation_next_wave_plus begin
+	: smc_instant_attack_sequence_c
+	if r_aci != c_attack_creation_next_wave_plus then jump skip_warning_marker_code
+		: do_the_warning_marker_code_actually
+		if v0 < c_attack_actual_creation_cap_for_uh_reset_or_something begin
+			# We signal the attacks for the furation of a count master from 0-9
+			i := long attack_pattern
+			i += v0
 
-		# We signal the attacks for the furation of a count master from 0-9
-		i := long attack_pattern
-		i += v0
+			load v2 - v2
 
-		load v2 - v2
+			if v2 != 0 begin
+				v4 := 59
+				i := select_height_ob1
+				i += v2
+				load v5 - v5
+				i := warning_ui
+				sprite v4 v5 3
+			end
 
-		if v2 != 0 begin
-			v4 := 59
-			i := select_height_ob1
-			i += v2
-			load v5 - v5
-			i := warning_ui
-			sprite v4 v5 3
+			:next smc_instant_attack_sequence_b
+			# if we've counted it out
+			if v0 == c_attack_display_limit begin
+				reset_count_master
+
+				r_aci := 0
+				i := attack_creation_index
+				save r_aci - r_aci
+			end
 		end
-
-		# if we've counted it out
-		if v0 == 9 begin
-			reset_count_master
-
-			r_aci := 0
-			i := attack_creation_index
-			save r_aci - r_aci
-		end
-	end
+	: skip_warning_marker_code
 
 	if r_aci < c_attack_creation_cap begin
 		# if it's the first tick of a count master:
@@ -991,6 +1059,7 @@ to-code
 					i += r_aci
 					i += r_aci
 
+					:next smc_hard_mode_bar_creation_value
 					v3 := 80
 
 					save v3 - v4
@@ -1112,17 +1181,8 @@ to-code
 	save v3
 	save v3
 	save v1
-
-	#i := attack_creation_index
-	#vF := c_attack_creation_next_wave
-	#save vF - vF
 ;
 
-: set_count_master_to_attack
-	i := smc_count_master_value
-	vF := c_count_master_atk
-	save vF - vF
-;
 
 : inc_count_master
 	v1 += 1
@@ -1157,7 +1217,10 @@ to-code
 	# If we should pass over to attacks
 	vA := 1
 	
-	set_count_master_to_attack
+	#set_count_master_to_attack
+	i := smc_count_master_value
+	vF := c_count_master_atk
+	save vF - vF
 
 	# We want to like, give the player a green attack bonus when they have momentum
 	# As that's how we're going to judge game progress progression and winning
@@ -1166,13 +1229,7 @@ to-code
 	# of the attack sequence
 	# If they're at cap when they hit it, they progress
 
-	create_game_progress_targets
-
-	# Reset the counter
-	reset_count_master
-;
-
-: create_game_progress_targets
+	# create_game_progress_targets
 	# clear current lane:
 	i := vulnerable_attack_lane
 	vF := 0
@@ -1190,14 +1247,24 @@ to-code
 		i := vulnerable_attack_lane
 		save v7 - v7
 	end
+
+	# do a kata
+	i := m_player_goal
+ 	vF := 4
+ 	: smc_hard_modecancel_kata_a
+ 	save vF - vF
+
+	# Reset the counter
+	reset_count_master
+
 ;
 
 :const attack_return_to_defend_count 24
 
-: attack_waves_remaining
-1
+: extra_attack_waves_remaining
+0
 
-:monitor attack_waves_remaining 1
+:monitor extra_attack_waves_remaining 1
 
 : service_attackline
 	i := m_player_goal
@@ -1209,17 +1276,17 @@ to-code
 	i := count_master
 	load v1
 
-	# Pull out if we're a 0 or a 1 count in the master:
-	v4 := 0x1
-	v4 &= v0
-
+	:next smc_hard_mode_quick_attack_end
 	vF := attack_return_to_defend_count
 
 	# If we don't hit a vulnerable lane, we can't attack sequence combo
 	if v0 == vF begin
-		i := attack_waves_remaining
+		
 		# If we should pass over to defend
 		vA := 0
+
+		# Happens to be 0
+		i := extra_attack_waves_remaining
 		save vA - vA
 
 		set_count_master_to_defend
@@ -1228,18 +1295,35 @@ to-code
 		return
 	end
 
+	:next smc_hard_mode_quick_attack_speed_A
+	v0 += 0
+
+	# Pull out if we're a 0 or a 1 count in the master:
+	v4 := 0x1
+	v4 &= v0
+
+	# If it's the last step of the attack sequence and the palyer hit the vuln marker
+	# then as the game progresses they get another attack sequence:
 	if v0 == 16 begin
+		# do a kata
+		i := m_player_goal
+	 	vF := 4
+	 	: smc_hard_modecancel_kata_b
+	 	save vF - vF
+
 		if v1 == 0 begin
 			i := player_hit_the_vuln
 			load vF - vF
 			save v1 - v1 # v1 happens to be 0 so this makes things easier
 			if vF == 1 begin
-				i := attack_waves_remaining
+				i := extra_attack_waves_remaining
 				load vF - vF
 				if vF != 0 begin
 					vF -= 1
 					save vF - vF
 					begin_attack_wave
+					:next smc_hard_mode_quick_attack_speed_C
+					v0 += 0
 				end
 			end
 		end
@@ -1361,6 +1445,8 @@ to-code
 
 	# If we're on the off beat of the attack cycle
 	# And we've only just started
+	:next smc_hard_mode_quick_attack_speed_B
+	v0 += 0
 
 	inc_count_master
 
@@ -1580,7 +1666,7 @@ jump player_handle_winthegame
 
 		if v3 == v7 begin
 
-			i := attack_waves_remaining
+			i := extra_attack_waves_remaining
 			load vF - vF
 
 			if vF == 0 begin
@@ -1596,11 +1682,12 @@ jump player_handle_winthegame
 		 			i := game_progress
 		 			load v3 - v3
 		 			v3 += 1
+		 			# save the progress
+		 			save v3 - v3
 
 		 			if v3 == 3 begin
-		 				v0 := 0
 		 				# We won the game
-
+		 				# Run the ending attack animation
 		 				v5 := 10
 		 				i := attack_override
 						save v5 - v5
@@ -1610,13 +1697,13 @@ jump player_handle_winthegame
 						save v0
 		 			end
 
-		 			save v3 - v3
 
 		 			i := m_momentum
 		 			v3 := 64
 		 			save v3 - v3
 
 		 			score_momentum
+
 		 			return
 				end
 			end
@@ -1657,6 +1744,7 @@ jump player_handle_winthegame
 : m_momentum_limits
  170
  200
+ 245
  245
 
 : m_momentum_limit_indicator_x
@@ -2001,10 +2089,6 @@ jump player_handle_winthegame
 : player_handle_winthegame
 	player_standard_30fps
 
-	if r_player_stance_frame >= 16 begin
-		r_player_stance_frame := 16
-	end
-
 	v7 := 8
 	if r_player_stance_frame < 11 then v7 := 10
 	if r_player_stance_frame < 10 then v7 := 4
@@ -2012,6 +2096,16 @@ jump player_handle_winthegame
 
 	r_player_true_frame := 131
 	r_player_true_frame += r_player_stance_frame
+
+	if r_player_stance_frame >= 15 begin
+		r_player_true_frame := 146
+	end
+
+	if r_player_stance_frame == 16 begin
+		i := game_is_over
+		r_player_stance_frame := 250
+		save r_player_stance_frame - r_player_stance_frame
+	end
 
 	jump draw_player
 
@@ -2274,6 +2368,7 @@ dobyte c_maul_introduction
 0
 
 
+:monitor m_player_goal 1
 :monitor m_maul_goal 1
 
 
@@ -2558,55 +2653,6 @@ to-code
 
 
 
-: maul_handle_midswing
-	maul_standard_30fps
-
-	if r_player_stance_frame == 10 begin
-		i := m_momentum
-		load vF - vF
-		r_player_cur_stance := c_maul_midswingend
-		if vF == 10 begin
-			r_player_cur_stance := c_maul_midswingkill
-			jump kill_player
-		end
-
-		i := m_maul_goal
-		load vF - vF
-		if vF == 3 then r_player_cur_stance := c_maul_mid2low
-
-		jump new_service_maul_value
-	end
-
-	v7 := -4
-
-	r_player_true_frame := 31
-	r_player_true_frame += r_player_stance_frame
-
-	jump draw_that_maul
-
-
-: maul_handle_highswing
-	maul_standard_30fps
-
-	if r_player_stance_frame == 9 begin
-		i := m_momentum
-		load vF - vF
-		r_player_cur_stance := c_maul_highswingend
-		if vF == 10 begin
-			r_player_cur_stance := c_maul_highswingkill
-			jump kill_player
-		end
-		jump new_service_maul_value
-	end
-
-	v7 := -2
-
-	r_player_true_frame := 17
-	r_player_true_frame += r_player_stance_frame
-
-	jump draw_that_maul
-
-
 : maul_handle_sharedkill
 	maul_standard_30fps
 
@@ -2630,9 +2676,9 @@ to-code
 : maul_handle_winthegame
 	maul_standard_30fps
 
-	if r_player_stance_frame >= 16 begin
-		
-		r_player_stance_frame := 16
+	if r_player_stance_frame >= 15 begin
+		r_player_stance_frame := 15
+		r_player_stance_step := 0
 	end
 
 	v7 := 0
@@ -2752,29 +2798,6 @@ to-code
 ;
 
 
-: service_screen_shaker
-	i := m_screen_shake_vars
-	load v0 - v1
-
-	if v0 == 0 then return
-
-	v1 += -1
-	if v1 >= 2 begin
-		if v1 == 3 begin
-			buzzer := v1
-		end
-		scroll-up 1
-	end
-
-	if v1 == -1 begin
-		v0 += -1
-		v1 := 4
-
-	end
-
-	save v0 - v1
-;
-
 : i_delay
 	if vE == 1 then return
 	vF := c_long_delay_time
@@ -2788,6 +2811,26 @@ to-code
 		if vf != 0 then
 	again
 ;
+
+: bank_load
+	i := long bank_source
+	save v1
+	vE := 0
+	loop
+		i_next_next bank_source 0
+		i += vE
+		i += vE
+		load v7
+		i := 0
+		i += vE
+		i += vE
+		save v7
+		vE += 4
+		if vE != 0 then
+	again
+	i := long bank_stash
+	load vF
+	return
 
 :calc just_how_bad_is_it { 4096 - HERE }
 : kill_player
@@ -2814,11 +2857,343 @@ to-code
 	i := wait_for_player_death_sync
 	vF := 1
 	save vF - vF
-
-
+	
 	jump new_service_maul_value
 
+
 to-data
+
+# note to self, labels in banks must have been defined already
+
+# color 0: 0x00000000
+# color 1: 0xFF000000
+: logo2 # (256 bytes)
+	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+	0x00 0x00 0x00 0x03 0x00 0x07 0x00 0x07
+	0x00 0x07 0x00 0x07 0x00 0x03 0x00 0x03
+
+	0x00 0x03 0x00 0x03 0x0F 0xC3 0x3F 0xF1
+	0x20 0xFC 0x40 0x1F 0x00 0x07 0x00 0x00
+	0x0E 0x7C 0x11 0x40 0x11 0x78 0x11 0x40
+	0x0E 0x40 0x00 0x00 0x00 0x00 0x00 0x00
+
+	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x03
+	0x78 0x67 0xFE 0xF7 0xFF 0x73 0xCF 0xF3
+	0x07 0xF3 0x03 0xFF 0x83 0xFF 0x87 0xDC
+
+	0xBF 0x80 0xFF 0x07 0xFC 0x7F 0xF1 0xFF
+	0x07 0xFE 0xFF 0xC0 0xFC 0x00 0x00 0x00
+	0x07 0xD1 0x01 0x11 0x01 0x1F 0x01 0x11
+	0x01 0x11 0x00 0x00 0x00 0x00 0x00 0x00
+
+	0x00 0x00 0x00 0xC0 0x01 0xC0 0x01 0xE0
+	0x01 0xE0 0x1E 0xE0 0x3F 0xF1 0x33 0x77
+	0xB7 0x7F 0xBE 0xFE 0xFD 0xF0 0xFF 0xC0
+	0xFF 0x87 0x8E 0x1F 0x01 0xFC 0x0F 0xE0
+
+	0xFF 0x80 0xFC 0x00 0xF0 0x1F 0x80 0x1F
+	0x00 0x10 0x00 0x10 0x00 0x10 0x00 0x1F
+	0x7C 0x10 0x40 0x10 0x78 0x10 0x40 0x10
+	0x7C 0x10 0x01 0xC0 0x01 0xFF 0x01 0xFF
+
+	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+	0x00 0x00 0x00 0x00 0xC0 0x00 0xC0 0x00
+	0xC0 0x00 0x03 0xF0 0x3F 0x9C 0xFC 0x02
+	0xF0 0x02 0x80 0x0C 0x00 0x00 0x00 0x00
+
+	0x00 0x00 0x00 0x00 0x3C 0x78 0x3C 0x78
+	0x42 0x80 0x42 0x80 0x42 0x80 0x3C 0x70
+	0x42 0x08 0x42 0x08 0x42 0x08 0x3C 0xF0
+	0x3C 0xF0 0x00 0x07 0xFF 0xFF 0xFF 0xFF
+
+
+: hard_mode
+	text "want hard mode?\0"
+: hard_mode_2
+	text "now push 1!\0"
+
+
+: ending_new_1_1
+	text "and so,\0"
+: ending_new_1_2
+	text "by your hand\0"
+: ending_new_1_3
+	text "a new saga\0"
+: ending_new_1_4
+	text "begins...\0"
+
+
+:const c_credit_scroll_speed 8
+
+: ending_silly_1
+	text "presenting\0"
+	text "the extra special\0"
+	text "edition anthology!\0\0"
+	text "with new features\0"
+	text "such as\0\0"
+	text "qui-gon lives!\0\0"
+	text "jar jar\0"
+	text "digitally erased\0\0"
+	text "even bigger hair for\0"
+	text "padme\0\0"
+	text "more pod racing\0\0"
+	text "even more spinning!\0\0"
+	text "yoda is that weird\0"
+	text "puppet again\0\0"
+	text "light sabers now\0"
+	text "cycle through rgb\0\0"
+	text "obi-wan gets hooked\0"
+	text "on death sticks\0\0"
+	text "order 66 mistakenly\0"
+	text "read as order 99 due\0"
+	text "to excessive spinning\0\0"
+	text "pod racing banned\0\0"
+	text "luke just lives on\0"
+	text "tatooine forever\0\0"
+	text "he's really bored\0\0"
+	text "leia gets to live\0"
+	text "as a princess while\0"
+	text "he... farms water??!\0\0"
+	text "seems pretty\0"
+	text "outragious and\0"
+	text "unfair...\0\0"
+	text "darth maul survives\0"
+	text "and gets robot legs\0\0"
+	text "his lower half gets\0"
+	text "a new robot body too\0\0"
+	text "they star in a hit\0"
+	text "new sitcom called\0"
+	text "'this is getting out\0"
+	text "of hand'\0\0"
+	text "alderaan still\0"
+	text "explodes and we cant\0"
+	text "figure out why?\0\0"
+	text "double maclunkey\0\0"
+	text "han shoots first\0\0"
+	text "he shoots second too\0\0"
+	text "greedo isn't even\0"
+	text "there any more?\0\0"
+	text "han is just shooting\0"
+	text "wildly. it's weird...\0\0"
+	text "we found a way to\0"
+	text "add jabba to ep v\0\0"
+	text "ewoks are unable to\0"
+	text "sate their blood lust\0"
+	text "and try to conquer\0"
+	text "the galaxy\0\0"
+	text "no trees in space tho\0\0\0\0"
+	text "and of course!\0\0"
+	text "somehow\0\0palpatine\0\0\0"
+	text "did not return\0\0\0\0"
+	text "the end?\0\0\0\0"
+	text "try out hard mode\0"
+	text "by pressing z and\0"
+	text "then 1 on the title\0"
+	text "screen\0\0\0\0\0\0\0\0\0\0\0^"
+
+
+bank_init BNK_single_lomem
+
+:calc MEM_BNK_single_lowmem { HERE }
+
+: draw_logo
+	lores
+	clear
+	plane 1
+	# draw logo:
+	i := long logo2
+	v0 := 0
+	v2 := 32
+
+	loop
+		v1 := 0
+		sprite v0 v1 0
+		i += v2
+		v1 := 16
+		sprite v0 v1 0
+		i += v2
+		v0 += 16
+		if v0 != 64 then
+	again
+
+	v0 := key
+;
+
+: always_hard_helper_code
+vf := 2
+
+: always_hard_helper_code_warnings
+jump do_the_warning_marker_code_actually
+
+: maximaul_mode
+	clear
+	hires
+	plane 2
+	auto_text hard_mode 10 20
+	plane 1
+	auto_text hard_mode_2 10 30
+
+	v0 := key
+
+	if v0 == 1 begin
+		#i :=
+
+		i := smc_hard_mode_quick_attack_end
+		v0 := 12
+		save v0
+
+		i := smc_hard_mode_quick_attack_speed_A
+		v0 := 6
+		save v0
+
+		i := smc_hard_mode_quick_attack_speed_C
+		save v0
+
+		i := smc_hard_mode_quick_attack_speed_B
+		v0 := -6
+		save v0
+
+		i := always_hard_helper_code
+		load v1
+
+		i := smc_hard_mode_always_hard_patterns
+		save v1
+
+		i := smc_hard_modecancel_kata_a
+		save v1
+
+		i := smc_hard_modecancel_kata_b
+		save v1
+
+		i := smc_instant_attack_sequence_a
+		v0 := 0
+		save v0
+
+		i := smc_instant_attack_sequence_b
+		v0 := 200
+		save v0
+
+		i := always_hard_helper_code_warnings
+		load v1
+
+		i := smc_instant_attack_sequence_c 
+		save v1
+
+		i := smc_hard_mode_faster_pattern_creation
+		v0 := 12
+		save v0
+
+		i := attack_creation_index
+		save v0
+
+		i := smc_hard_mode_bar_creation_value
+		v0 := 40
+		save v0
+
+		jump skip_to_game
+	end
+
+	jump main
+
+
+
+: service_screen_shaker
+	i := m_screen_shake_vars
+	load v0 - v1
+
+	if v0 == 0 then return
+
+	v1 += -1
+	if v1 >= 2 begin
+		if v1 == 3 begin
+			buzzer := v1
+		end
+		scroll-up 1
+	end
+
+	if v1 == -1 begin
+		v0 += -1
+		v1 := 4
+
+	end
+
+	save v0 - v1
+;
+
+
+: ending_sequence
+	hires
+	plane 3
+	clear
+	plane 1
+
+	auto_text ending_new_1_1 43 5
+	i_delay
+	auto_text ending_new_1_2 28 11
+	i_delay
+	auto_text ending_new_1_3 30 24
+	i_delay
+	auto_text ending_new_1_4 40 30
+	
+	intro_wait
+
+	vA := 0
+	vB := 0
+
+	loop
+		scroll-up 1
+
+		vB += 1
+		if vB == 6 begin
+
+			vf := 0
+			v1 := 1
+			v2 := 59
+
+			loop
+				i_next_next silly_text_address ending_silly_1
+				drawtext
+
+				if vF == 0xfe then jump the_real_end
+				if vf != 0xff then
+			again
+
+			vF := v1
+			vF += 1
+
+			i := silly_text_address
+			load v0 - v1
+			v1 += vF
+			v0 += vF
+			save v0 - v1
+
+			vA += 1
+			vB := 0
+		end
+
+		vF := c_credit_scroll_speed
+		v0 := 0x6 if v0 key then vF := 1
+
+		f_delay
+	again
+
+	: the_real_end
+	exit
+
+;
+
+# I want critters that get hit to be cosmetically flung from the level
+:calc MEM_BNK_single_lowmem { HERE - MEM_BNK_single_lowmem }
+
+bank_end
+
+: bank_stash
+0 0 0 0
+0 0 0 0
+0 0 0 0
+0 0 0 0
 
 : bar_line
 0
@@ -9635,11 +10010,6 @@ to-data
 
 
 
-
-
-:stringmode text " abcdefghijklmnopqrstuvwxyz0123456789.!?,'_\"%*=@-" { :byte { VALUE * 5 } }
-:stringmode text "\0"                               { :byte -1 }
-
 : font
 : fivewide_full_font # space first:
 	0 0 0 0 0 				 #  
@@ -9739,49 +10109,6 @@ do-32 mac_sprite_address_next
 do-32 mac_sprite_address_next
 do-32 mac_sprite_address_next
 
-
-# color 0: 0x00000000
-# color 1: 0xFF000000
-: logo2 # (256 bytes)
-	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-	0x00 0x00 0x00 0x03 0x00 0x07 0x00 0x07
-	0x00 0x07 0x00 0x07 0x00 0x03 0x00 0x03
-
-	0x00 0x03 0x00 0x03 0x0F 0xC3 0x3F 0xF1
-	0x20 0xFC 0x40 0x1F 0x00 0x07 0x00 0x00
-	0x0E 0x7C 0x11 0x40 0x11 0x78 0x11 0x40
-	0x0E 0x40 0x00 0x00 0x00 0x00 0x00 0x00
-
-	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x03
-	0x78 0x67 0xFE 0xF7 0xFF 0x73 0xCF 0xF3
-	0x07 0xF3 0x03 0xFF 0x83 0xFF 0x87 0xDC
-
-	0xBF 0x80 0xFF 0x07 0xFC 0x7F 0xF1 0xFF
-	0x07 0xFE 0xFF 0xC0 0xFC 0x00 0x00 0x00
-	0x07 0xD1 0x01 0x11 0x01 0x1F 0x01 0x11
-	0x01 0x11 0x00 0x00 0x00 0x00 0x00 0x00
-
-	0x00 0x00 0x00 0xC0 0x01 0xC0 0x01 0xE0
-	0x01 0xE0 0x1E 0xE0 0x3F 0xF1 0x33 0x77
-	0xB7 0x7F 0xBE 0xFE 0xFD 0xF0 0xFF 0xC0
-	0xFF 0x87 0x8E 0x1F 0x01 0xFC 0x0F 0xE0
-
-	0xFF 0x80 0xFC 0x00 0xF0 0x1F 0x80 0x1F
-	0x00 0x10 0x00 0x10 0x00 0x10 0x00 0x1F
-	0x7C 0x10 0x40 0x10 0x78 0x10 0x40 0x10
-	0x7C 0x10 0x01 0xC0 0x01 0xFF 0x01 0xFF
-
-	0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-	0x00 0x00 0x00 0x00 0xC0 0x00 0xC0 0x00
-	0xC0 0x00 0x03 0xF0 0x3F 0x9C 0xFC 0x02
-	0xF0 0x02 0x80 0x0C 0x00 0x00 0x00 0x00
-
-	0x00 0x00 0x00 0x00 0x3C 0x78 0x3C 0x78
-	0x42 0x80 0x42 0x80 0x42 0x80 0x3C 0x70
-	0x42 0x08 0x42 0x08 0x42 0x08 0x3C 0xF0
-	0x3C 0xF0 0x00 0x07 0xFF 0xFF 0xFF 0xFF
 
 : handy_all_fs
 	0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF
@@ -10219,3 +10546,8 @@ dobyte c_maul_high_static # next stance
 :byte { just_how_bad_is_it >> 8 }
 :byte { just_how_bad_is_it }
 :monitor justhowbad "%2i"
+
+: low_memory_bank_size
+:byte { MEM_BNK_single_lowmem >> 8 }
+:byte { MEM_BNK_single_lowmem }
+:monitor low_memory_bank_size "%2i"
